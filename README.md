@@ -5,8 +5,8 @@ The calculus was originally defined by I. Lanese, C. A. Mezzina, A. Schmitt and 
 
 ## The interpreter
 
-  - croll-interpreter.maude: the source of the interpreter
-  - USAGE: a description of the interpreter
+  - [croll-interpreter.maude](https://github.com/gzoumix/crollPI/blob/master/croll-interpreter.maude): the source of the interpreter
+  - [USAGE](https://github.com/gzoumix/crollPI/blob/master/USAGE.md): a description of the interpreter
 
 ## Examples
 ### Simple Encodings
