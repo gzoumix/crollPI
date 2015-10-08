@@ -1,0 +1,41 @@
+mod CROLL-SIMPLE-ENCODINGS is
+ protecting CROLL-INTERPRETER .
+
+ vars P Q R C : Process .
+ vars X Y : Variable .
+ vars A B D : Channel .
+ vars G U : Kev .
+ vars H F : Thread .
+ vars I J : MyInt .
+ vars O : Bool .
+
+ ***************************
+ *** 1. freshness operator
+
+ op freshChan0 : -> Channel [ctor] . *** an automatically fresh channel
+ op freshChan1 : -> Channel [ctor] . *** an automatically fresh channel
+ op freshKev : -> Kev [ctor] .      *** an automatically fresh position
+
+ ***************************
+ *** 2. Stabilizer:
+
+ op stabilize : Process -> Process .
+ op fail : -> Process .
+
+ eq stabilize(P) = (freshChan0).(freshChan1).( freshChan0 < 0 >: (freshChan1 <>) | (freshChan0('x) : freshKev -> P)
+                | freshChan1 !('x): '0 -> (freshChan0 < 0 >: (freshChan1 <>) | (freshChan0('x) : freshKev -> P))) .
+ eq fail = roll(freshKev) .
+
+
+ ***************************
+ *** 3. Try/Catch
+
+ op try_catch_ : Process Process -> Process [prec 50  gather (e E)] .
+ op throw : -> Process .
+
+ *** principle: try the process triggered by freshChan0, i.e. P, and if there is a throw in P, change to freshChan1, i.e. Q
+ eq try P catch Q = (freshChan0).(freshChan1).( freshChan0 < 0 >: (freshChan1 <>) | (freshChan0('x) : freshKev -> P) | (freshChan1 -> Q) ) .
+ eq throw = roll(freshKev) .
+ 
+endm
+

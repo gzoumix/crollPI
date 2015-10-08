@@ -1,0 +1,549 @@
+***
+*** A crollpi interpreter on the Maude platform
+***
+*** Copyright (c) 2012 Michael Lienhardt
+***
+***
+*** This program is free software; you can redistribute it and/or
+*** modify it under the terms of the GNU General Public License as
+*** published by the Free Software Foundation; either version 3 of the
+*** License, or (at your option) any later version.
+***
+*** This program is distributed in the hope that it will be useful, but
+*** WITHOUT ANY WARRANTY; without even the implied warranty of
+*** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+*** General Public License for more details.
+***
+*** You should have received a copy of the GNU General Public License
+*** along with this program.  If not, see <http://www.gnu.org/licenses/>.
+***
+
+
+*************************************************************
+*** Copy of Int (to symplify the syntax of processes)
+*************************************************************
+
+fmod RENAMED-INT is
+  protecting INT * (
+    sort Zero to MyZero,
+    sort NzNat to MyNzNat,
+    sort Nat to MyNat,
+    sort NzInt to MyNzInt,
+    sort Int to MyInt,
+
+    op s_ : Nat -> NzNat to $succ,
+    op -_ : Int -> Int to $neg,
+    op _+_ : Int Int -> Int to $add,
+    op sd : Nat Nat -> Nat to $sd,
+    op _-_ : Int Int -> Int to $sub,
+    op _*_ : NzInt NzInt -> NzInt to $mult,
+    op _^_ : Int Nat -> Int to $pow,
+    op _|_ : Int Int -> Int to $ior,
+
+    op abs : NzInt -> NzNat to $abs,
+    op gcd : NzInt Int -> NzNat to $gcd,
+    op lcm : NzInt NzInt -> NzNat to $lcm,
+    op min : NzInt NzInt -> NzInt to $min,
+    op max : NzInt NzInt -> NzInt to $max,
+
+    op _xor_ : Int Int -> Int to $xor,
+    op _>>_ : Int Nat -> Int to  $shr,
+    op _<<_ : Int Nat -> Int to $shl,
+    
+    op _<_ : Int Int -> Bool to $prec,
+    op _<=_ : Int Int -> Bool to $preceq,
+    op _>_ : Int Int -> Bool to $le,
+    op _>=_ : Int Int -> Bool to $leq,
+
+    op _divides_ : NzInt Int -> Bool to $divides
+
+  ) .
+  
+endfm
+
+
+*************************************************************
+*** Sorts of Identifiers
+*************************************************************
+
+*** A channel identifier
+fmod CROLL-CHANNEL is
+ protecting QID .
+ protecting RENAMED-INT .
+ sort Channel .
+ subsort Qid < Channel .
+
+  op cId : MyInt -> Channel [ctor] .
+  *** A channel can be a name given by the user,
+  ***  or an integer generated automatically for freshness
+
+endfm
+
+*** A process variable
+fmod CROLL-VARIABLE is
+ protecting QID .
+ sort Variable .
+ subsort Qid < Variable .
+
+endfm
+
+*** A thread identifier
+fmod CROLL-THREAD is
+ protecting RENAMED-INT .
+ sort Thread .
+
+  op tId : MyInt -> Thread [ctor] .
+  *** A thread is a generated identifier for a running process.
+  *** It thus corresponds to a fresh integer
+
+endfm
+
+*** A position (i.e. a place to roll back to) identifier
+fmod CROLL-KEY-VARIABLE is
+ protecting QID .
+ sort Kev .
+ subsort Qid < Kev .
+endfm
+
+
+*************************************************************
+*** Sort of Processes
+*************************************************************
+
+fmod CROLL-PROCESS-BASE is
+ protecting CROLL-CHANNEL .
+ protecting CROLL-VARIABLE .
+ protecting CROLL-THREAD .
+ protecting CROLL-KEY-VARIABLE .
+ protecting RENAMED-INT .
+ 
+ sorts PureProcess Process .
+ subsorts MyInt Variable PureProcess < Process .
+  
+ op _|_        : Process Process -> PureProcess [ctor prec 100 gather (e E)] .                  *** parallel composition
+ op _._        : Channel Process -> PureProcess [ctor prec 41] .                                *** channel binder
+ op _<_>:_     : Channel Process Process -> PureProcess [ctor prec 50 gather (e & E)] .         *** sending message
+ op _(_):_->_  : Channel Variable Kev Process -> PureProcess [ctor prec 50 gather (e & & E)] .  *** trigger
+ op _;_        : Process Process -> PureProcess [ctor prec 46 gather (e E)] .                   *** pairs
+ op if_then_else_fi : Process Process Process -> PureProcess [ctor prec 45] .                   *** conditionals
+*** Not needed, already part of the Bool Module 
+
+ vars P Q R C : Process .
+ vars X Y : Variable .
+ vars A B D : Channel .
+ vars G U : Kev .
+ vars H F : Thread .
+ vars I J : MyInt .
+ vars O : Bool .
+
+
+ ***************************
+ *** 1. Substitutions
+ op _`[p_/_`]   : Process Variable Process -> Process [prec 46].
+ op _`[c_/_`]   : Process Channel  Channel -> Process [prec 47] . 
+ op _`[k_/_`]   : Process Thread Kev -> Process [prec 48].
+
+ *** Subsitution of Process
+*** eq O [p P / X ] = O .  *** Bool
+ eq I [p P / X ] = I .  *** Int
+ eq X [p P / X ] = P .  *** Variable
+ ceq X [p P / Y ] = X if X =/= Y .
+ eq (P | R) [p Q / X ] = (P [p Q / X ]) | (R [p Q / X ]) .  *** PureProcess
+ eq ( (A). P ) [p Q / X ] = (A).(P [p Q / X ]) .
+ eq (A < P >: C ) [p Q / X ] = A < P [p Q / X ] >: ( C [p Q / X ] ) .
+ eq (A ( X ): G -> P ) [p Q / X ] = (A ( X ): G -> P ) .
+ ceq (A ( X ): G -> P ) [p Q / Y ] = A ( X ): G -> ( P [p Q / Y ] ) if X =/= Y .
+ eq ((if P then Q else R fi) [p C  / X ]) = (if (P [p C / X ]) then (Q [p C / X ]) else (R [p C / X ]) fi) .
+ eq (P ; Q) [p C  / X ] = ( (P [p C  / X ]) ; (Q [p C  / X ]) ) .
+
+ *** Substitution of Channel
+*** eq O [c P / X ] = O .  *** Bool
+ eq I [c B / A ] = I .  *** Int
+ eq X [c B / A ] = X .  *** Variable
+ eq (P | R) [c B / A ] = (P [c B / A ]) | (R [c B / A ]) .  *** PureProcess
+ eq  ((A). P) [c B / A ] = (A). P .
+ ceq ((D). P) [c B / A ] = (D).(P [c B / A ]) if A =/= D .
+ eq  (A < P >: C) [c B / A ] = B < P [c B / A ] >: (C [c B / A ]) .
+ ceq (D < P >: C) [c B / A ] = D < P [c B / A ] >: (C [c B / A ]) if A =/= D .
+ eq  (A (X): G -> P) [c B / A ] = B (X): G -> (P [c B / A ]) .
+ ceq (D (X): G -> P) [c B / A ] = D (X): G -> (P [c B / A ]) if A =/= D .
+ eq ((if P then Q else R fi) [c B / A ]) = (if (P [c B / A]) then (Q [c B / A]) else (R [c B / A ]) fi) .
+ eq (P ; Q) [c B  / A ] = ( (P [c B  / A ]) ; (Q [c B  / A ]) ) .
+
+
+ *** Substitution of Position
+*** eq O [k H / G ] = O .  *** Bool
+ eq I [k H / G ] = I .  *** Int
+ eq X [k H / G ] = X .  *** Variable
+ eq (P | R) [k H / G ] = (P [k H / G ]) | (R [k H / G ]) .  *** PureProcess
+ eq ((D). P) [k H / G ] = (D).(P [k H / G ]) .
+ eq (A < P >: C) [k H / G ] = A < P [k H / G ] >: (C [k H / G ]) .
+ eq  (A (X): G -> P) [k H / G ] = A (X): G -> P .
+ ceq (A (X): U -> P) [k H / G ] = A (X): U -> (P [k H / G ]) if U =/= G .
+ eq ((if P then Q else R fi) [k H / G ]) = (if (P [k H / G ]) then (Q [k H / G ]) else (R [k H / G ]) fi) .
+ eq (P ; Q) [k H / G ] = ( (P [k H / G ]) ; (Q [k H / G ]) ) .
+
+
+ ***************************
+ *** 2. Notation
+ op _<_> : Channel Process -> PureProcess .
+ op _<>:_ : Channel Process -> PureProcess .
+ op _<> : Channel -> PureProcess .
+ op _<_>._ : Channel Process Process -> PureProcess .
+ op _<_>:_._ : Channel Process Process Process -> PureProcess .
+
+ op _(_)->_ : Channel Variable Process -> PureProcess .
+ op _:_ -> _ : Channel Kev Process -> PureProcess .
+ op _ -> _ : Channel Process -> PureProcess .
+ op _!(_):_->_ : Channel Variable Kev Process -> PureProcess [prec 50 gather (e & & E)] .
+ op _!:_->_ : Channel Kev Process -> PureProcess .
+ op _!(_)->_ : Channel Variable Process -> PureProcess .
+ op _!->_ : Channel Process -> PureProcess .
+ 
+ 
+ eq A < P > = A < P >: 0 .
+ eq A <>: P = A < '0 >: P .
+ eq A <> = A < 0 > .
+ 
+ eq A(P) -> Q = A(P): '0 -> Q .
+ eq A : G -> Q = A('0): G -> Q .
+ eq A -> Q = A('0): '0 -> Q .
+
+ eq A !(X): G -> P = ('pp).( A(X): G -> ( (P) | ('pp('Y) -> (('pp < 'Y >) | 'Y))) | 'pp < A(X): G -> ( (P) | ('pp('Y) -> (('pp < 'Y >) | 'Y))) >) .
+
+ eq A !: G -> P = A !('0): G -> P .
+ eq A !(X) -> P = A !(X): '0 -> P .
+ eq A !-> P = A !('0): '0 -> P .
+
+
+ ***************************
+ *** 3. Operations on values
+ op _+_  : Process Process -> Process .
+ op _-_  : Process Process -> Process [prec 33 gather (E e)] .
+ op _*_  : Process Process -> Process [assoc prec 31] .
+ op abs  : Process -> Process .
+ op fst  : Process -> Process .
+ op snd  : Process -> Process .
+ op not_ : Process -> Process [prec 37] .
+
+ op _<_  : Process Process -> Process [prec 37] .
+ op _<=_ : Process Process -> Process [prec 37] .
+ op _>_  : Process Process -> Process [prec 37] .
+ op _>=_ : Process Process -> Process [prec 37] .
+ op _!=_ : Process Process -> Process [prec 37] .
+ op _p=_ : Process Process -> Process [prec 37] .
+ op _or_ : Process Process -> Process [prec 37 gather (e E)] .
+ op _and_ : Process Process -> Process [prec 37  gather (e E)] .
+ 
+ eq I + J  = $add(I , J) .
+ eq I - J  = $sub(I , J) .
+ eq I * J  = $mult(I , J) .
+ eq abs(I) = $abs(I) .
+ eq fst(P ; Q) = P .
+ eq snd(P ; Q) = Q .
+
+ op asMyInt : Bool -> MyInt .
+ eq asMyInt(true) = 1 .
+ eq asMyInt(false) = 0 .
+ 
+ eq I < J = asMyInt($prec(I , J)) .
+ eq I <= J = asMyInt($preceq(I, J)) .
+ eq I > J = asMyInt($le(I , J)) .
+ eq I >= J = asMyInt($leq(I , J)) .
+ eq I != J =  asMyInt(I =/= J) .
+ eq I p= J = asMyInt(I == J) .
+ eq I or J = I + J .
+ eq I and J = $min(I , J) .
+ eq not(I) = asMyInt(not($prec(0 , I))) .
+
+ eq ((Q + R) [p P / X ]) = ((Q [p P / X ]) + (R [p P / X ])) .
+ eq ((Q + R) [c B / A ]) = ((Q [c B / A ]) + (R [c B / A ])) .
+ eq ((Q + R) [k H / G ]) = ((Q [k H / G ]) + (R [k H / G ])) .
+
+ eq ((Q - R) [p P / X ]) = ((Q [p P / X ]) - (R [p P / X ])) .
+ eq ((Q - R) [c B / A ]) = ((Q [c B / A ]) - (R [c B / A ])) .
+ eq ((Q - R) [k H / G ]) = ((Q [k H / G ]) - (R [k H / G ])) .
+
+ eq ((Q * R) [p P / X ]) = ((Q [p P / X ]) * (R [p P / X ])) .
+ eq ((Q * R) [c B / A ]) = ((Q [c B / A ]) * (R [c B / A ])) .
+ eq ((Q * R) [k H / G ]) = ((Q [k H / G ]) * (R [k H / G ])) .
+
+ eq ((abs(Q)) [p P / X ]) = (abs(Q [p P / X ])) .
+ eq ((abs(Q)) [c B / A ]) = (abs(Q [c B / A ])) .
+ eq ((abs(Q)) [k H / G ]) = (abs(Q [k H / G ])) .
+
+ eq ((fst(Q)) [p P / X ]) = (fst(Q [p P / X ])) .
+ eq ((fst(Q)) [c B / A ]) = (fst(Q [c B / A ])) .
+ eq ((fst(Q)) [k H / G ]) = (fst(Q [k H / G ])) .
+
+ eq ((snd(Q)) [p P / X ]) = (snd(Q [p P / X ])) .
+ eq ((snd(Q)) [c B / A ]) = (snd(Q [c B / A ])) .
+ eq ((snd(Q)) [k H / G ]) = (snd(Q [k H / G ])) .
+
+ eq ((not(Q)) [p P / X ]) = (not(Q [p P / X ])) .
+ eq ((not(Q)) [c B / A ]) = (not(Q [c B / A ])) .
+ eq ((not(Q)) [k H / G ]) = (not(Q [k H / G ])) .
+
+ eq ((Q < R) [p P / X ]) = ((Q [p P / X ]) < (R [p P / X ])) .
+ eq ((Q < R) [c B / A ]) = ((Q [c B / A ]) < (R [c B / A ])) .
+ eq ((Q < R) [k H / G ]) = ((Q [k H / G ]) < (R [k H / G ])) .
+
+ eq ((Q <= R) [p P / X ]) = ((Q [p P / X ]) <= (R [p P / X ])) .
+ eq ((Q <= R) [c B / A ]) = ((Q [c B / A ]) <= (R [c B / A ])) .
+ eq ((Q <= R) [k H / G ]) = ((Q [k H / G ]) <= (R [k H / G ])) .
+
+ eq ((Q > R) [p P / X ]) = ((Q [p P / X ]) > (R [p P / X ])) .
+ eq ((Q > R) [c B / A ]) = ((Q [c B / A ]) > (R [c B / A ])) .
+ eq ((Q > R) [k H / G ]) = ((Q [k H / G ]) > (R [k H / G ])) .
+
+ eq ((Q >= R) [p P / X ]) = ((Q [p P / X ]) >= (R [p P / X ])) .
+ eq ((Q >= R) [c B / A ]) = ((Q [c B / A ]) >= (R [c B / A ])) .
+ eq ((Q >= R) [k H / G ]) = ((Q [k H / G ]) >= (R [k H / G ])) .
+
+ eq ((Q p= R) [p P / X ]) = ((Q [p P / X ]) p= (R [p P / X ])) .
+ eq ((Q p= R) [c B / A ]) = ((Q [c B / A ]) p= (R [c B / A ])) .
+ eq ((Q p= R) [k H / G ]) = ((Q [k H / G ]) p= (R [k H / G ])) .
+
+ eq ((Q != R) [p P / X ]) = ((Q [p P / X ]) != (R [p P / X ])) .
+ eq ((Q != R) [c B / A ]) = ((Q [c B / A ]) != (R [c B / A ])) .
+ eq ((Q != R) [k H / G ]) = ((Q [k H / G ]) != (R [k H / G ])) .
+
+ eq ((Q or R) [p P / X ]) = ((Q [p P / X ]) or (R [p P / X ])) .
+ eq ((Q or R) [c B / A ]) = ((Q [c B / A ]) or (R [c B / A ])) .
+ eq ((Q or R) [k H / G ]) = ((Q [k H / G ]) or (R [k H / G ])) .
+
+ eq ((Q and R) [p P / X ]) = ((Q [p P / X ]) and (R [p P / X ])) .
+ eq ((Q and R) [c B / A ]) = ((Q [c B / A ]) and (R [c B / A ])) .
+ eq ((Q and R) [k H / G ]) = ((Q [k H / G ]) and (R [k H / G ])) .
+
+
+endfm
+
+
+fmod CROLL-PROCESS-ROLLBACK is
+ protecting CROLL-PROCESS-BASE .
+
+ op roll       : Kev -> PureProcess [ctor] .                  *** roll on key variable
+ op roll       : Thread -> PureProcess [ctor] .               *** roll on key
+
+
+ vars Q : Process .
+ vars A B : Channel .
+ vars H H1 H2 : Thread .
+ var X : Variable .
+ var G U : Kev .
+
+ ***************************
+ *** 1. Substitutions Extension for Process
+
+ eq (roll( G )) [p Q / X ] = roll( G ) .
+ eq (roll( H )) [p Q / X ] = roll( H ) .
+
+ eq (roll( G )) [c B / A ] = roll( G ) .
+ eq (roll( H )) [c B / A ] = roll( H ) .
+
+ eq (roll( G )) [k H1  / G ] = roll( H1 ) .
+ eq (roll( H1 )) [k H2 / G ] = roll( H1 ) .
+ ceq (roll( U )) [k H1 / G ] = roll( U ) if U =/= G .
+
+endfm
+
+
+fmod CROLL-PROCESS-EXTENSION is
+ protecting CROLL-PROCESS-ROLLBACK .
+
+ vars P Q R C : Process .
+ vars X Y : Variable .
+ vars A B D : Channel .
+ vars G U : Kev .
+ vars H F : Thread .
+ vars I J : MyInt .
+ vars O : Bool .
+
+ ***************************
+ *** 1. freshness operator
+
+ op freshChan0 : -> Channel [ctor] . *** an automatically fresh channel
+ op freshChan1 : -> Channel [ctor] . *** an automatically fresh channel
+ op freshKev : -> Kev [ctor] .      *** an automatically fresh position
+
+ ***************************
+ *** 2. Stabilizer:
+
+ op stabilize : Process -> Process .
+ op fail : -> Process .
+
+ eq stabilize(P) = (freshChan0).(freshChan1).( freshChan0 < 0 >: (freshChan1 <>) | (freshChan0('x) : freshKev -> P)
+                | freshChan1 !('x): '0 -> (freshChan0 < 0 >: (freshChan1 <>) | (freshChan0('x) : freshKev -> P))) .
+ eq fail = roll(freshKev) .
+
+
+ ***************************
+ *** 3. Try/Catch
+
+ op try_catch_ : Process Process -> Process [prec 50  gather (e E)] .
+ op throw : -> Process .
+
+ *** principle: try the process triggered by freshChan0, i.e. P, and if there is a throw in P, change to freshChan1, i.e. Q
+ eq try P catch Q = (freshChan0).(freshChan1).( freshChan0 < 0 >: (freshChan1 <>) | (freshChan0('x) : freshKev -> P) | (freshChan1 -> Q) ) .
+ eq throw = roll(freshKev) .
+ 
+endfm
+
+
+********************************************
+*** Sorts of Configurations
+********************************************
+
+fmod CROLL-CONFIGURATION-BASE is
+ protecting CROLL-PROCESS-EXTENSION .
+ 
+ sort Configuration .
+ 
+ op nil   : -> Configuration [ctor] .
+ op _|_     : Configuration Configuration -> Configuration [ctor config assoc comm id: nil] .
+ op _:_   : Thread Process -> Configuration [ctor prec 110 gather (& e)] .
+ op m(_;_) : Configuration Thread -> Configuration [ctor] .
+ op _(_,_) : Thread Thread Thread -> Configuration [ctor] . 
+
+ *** For fresh Names
+ op t# : MyInt -> Configuration [ctor] . *** thread
+ op c# : MyInt -> Configuration [ctor] . *** channel
+ op freshCh : MyInt -> Channel .
+ op freshTh : MyInt -> Thread .
+
+ var I : MyInt .
+ 
+ eq freshCh(I) = cId(I) .
+ eq freshTh(I) = tId(I) .
+
+endfm
+
+
+fmod CROLL-CONFIGURATION-ROLLBACK is
+ protecting CROLL-CONFIGURATION-BASE .
+
+
+ op rlc : Thread -> Configuration [ctor] .                    *** The rollback command
+ op rm(_;_)  : Configuration Thread -> Configuration [ctor] . *** rolled memory
+ op `[_`] : Configuration -> Configuration [ctor] .           *** the freeze of a thread
+
+ op xtr : Configuration -> Configuration .
+
+
+ vars P Q C : Process .
+ vars A B : Channel .
+ vars H1 H2 : Thread .
+ var X : Variable .
+ var G : Kev .
+
+ ***************************
+ *** 2. Backward Semantics
+ 
+ **** 2.1 xtr Function
+ eq xtr(( H1 : (A < P >: C)) | ( H2 : (B (X): G -> Q))) =  ( H1 : C)            | ( H2 : (B (X): G -> Q)) .
+ eq xtr([ H1 : (A < P >: C)] | ( H2 : (B (X): G -> Q))) =  [ H1 : (A < P >: C)] | ( H2 : (B (X): G -> Q)) .
+ eq xtr(( H1 : (A < P >: C)) | [ H2 : (B (X): G -> Q)]) =  ( H1 : C)            | [ H2 : (B (X): G -> Q)] .
+ eq xtr([ H1 : (A < P >: C)] | [ H2 : (B (X): G -> Q)]) =  [ H1 : (A < P >: C)] | [ H2 : (B (X): G -> Q)] .
+
+endfm
+
+
+********************************************
+*** Reduction Rules
+********************************************
+
+mod SEMANTICS-FORWARD is
+ protecting CROLL-CONFIGURATION-ROLLBACK .
+
+ vars P Q C : Process .
+ vars X : Variable .
+ vars A : Channel .
+ vars G : Kev .
+ vars H1 H2 : Thread .
+ vars I : MyInt .
+
+
+ *** Structural Equivalence, put in reduction form
+ 
+ rl t#(I) | (H1 : P | Q) => t#( I + 2 ) | (H1 ( freshTh(I) , freshTh(I + 1))) | (freshTh(I) : P) | (freshTh(I + 1) : Q) .
+ rl c#(I) | (H1 : (A). P) => c#( I + 1 ) | (H1 : (P [c freshCh(I) / A ])) .
+ 
+ ***************************
+ *** Forward Reduction rules   
+
+ rl t#(I) | (H1 : A < P >: C) | (H2 : A (X): G -> Q) =>
+  t#(I + 1) | (freshTh(I) : ((Q [p P / X ]) [k freshTh(I) / G ])) | m((H1 : A < P >: C) | (H2 : A (X): G -> Q) ; freshTh(I))
+  [label com] .
+  
+ rl  H1 : (if 0 then P else Q fi) => H1 : Q [label if1] .
+ crl H1 : (if I then P else Q fi) => H1 : P if I =/= 0 [label if2] .
+
+
+endm
+
+
+mod SEMANTICS-BACKWARD is
+ protecting SEMANTICS-FORWARD .
+
+ vars P Q C : Process .
+ vars G : Kev .
+ vars N : Configuration .
+ vars H H1 H2 : Thread .
+
+ rl (H1 : roll (H2)) | m(N ; H2) => (H1 : roll (H2)) | rm(xtr(N) ; H2) | rlc(H2) [label start] .
+ rl rlc(H1) |  m((H1 : P) | (H : Q) ; H2) => rlc(H2) |  m([ H1 : P ] | (H : Q) ; H2)  [label span1] .
+ rl rlc(H1) |  m([ H1 : P ] | N ; H2)     =>            m([ H1 : P ] | N ; H2)  [label span1-gc1] .
+ rl rlc(H1) |  m((H1 : P) | [ N ] ; H2)   =>            m([ H1 : P ] | [ N ] ; H2)  [label span1-gc2] .
+
+ rl rlc(H1) | rm((H1 : P) | (H : Q) ; H2) =>           rm([ H1 : P ] | (H : Q) ; H2)  [label span2] .
+ rl rlc(H1) | rm([ H1 : P ] | N ; H2)     =>           rm([ H1 : P ] | N ; H2)  [label span2-gc1] .
+ rl rlc(H1) | rm((H1 : P) | [ N ] ; H2)   =>           rm([ H1 : P ] | [ N ] ; H2)  [label span2-gc2] .
+
+ rl rlc(H) | (H( H1 , H2 )) => (H( H1 , H2 )) | (rlc(H1)) | (rlc(H2)) [label branch-down] . 
+ rl rlc(H) | (H : P) => [ H : P ] [label up] .
+ rl [ H1 : P ] | [ H2 : Q ] | H(H1 , H2) => [ H : P | Q ] [label branch-up] .
+ rl  m(N ; H ) | [ H : P ] => N [label stop1] .
+ rl rm(N ; H ) | [ H : P ] => N [label stop2] .
+
+endm
+
+
+
+
+
+
+
+********************************************
+*** Finalize the interpreter
+********************************************
+
+mod CROLL-INTERPRETER is
+ protecting SEMANTICS-BACKWARD .
+ protecting CONVERSION .
+
+ *** Initial Configuration
+ op main(_) : Process -> Configuration .
+
+ var P : Process .
+
+ eq main ( P ) = c#(0) | t#(1) | (tId(0) : P) .
+
+
+ *** For Easy Name Creation
+ var I : MyInt .
+ vars M N : Qid .
+
+ op convert : MyInt -> Int .
+ op fresh : Qid MyInt -> Qid .
+
+ eq convert(0) = 0 .
+ eq convert($succ(I)) = s(convert(I)) .
+ eq fresh(M , I) = qid(string(M) + string(convert(I) , 10)) .
+
+ op cat : Qid Qid -> Qid .
+ eq cat(M, N) = qid(string( M ) + string( N )) .
+
+
+endm
+

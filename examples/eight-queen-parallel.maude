@@ -1,0 +1,161 @@
+in croll-interpreter
+
+*** Principle of the algorithm
+*** --------------------------
+***
+*** Each queen proposes a position, and then tests it with the position
+*** proposed by the previous queens. This algorithm tests more wrong configuration,
+*** but is far more concurrent (and hopefully efficient in a concurrent implementation) than the sequential approach.
+***
+*** As for the sequential approach, each queen is activated by the previous one,
+*** to ensure that its state can be re-initialized when a previous queen moves.
+*** But in the opposite of the sequential approach, it is activated before the previous
+*** queens made sure that their positions are sound, and thus all testing is done concurrently.
+*** When a queen sees that its position is not good, it rollbacks to test its next position,
+*** re-initializing the next queens in the process (so we don't miss possible solutions).
+
+mod EIGHT-QUEEN is
+ protecting CROLL-INTERPRETER .
+
+ var I : MyInt .
+ vars X Y : Variable .
+ vars P Q : Process .
+
+
+ *** Channels used in the program
+ op active : MyInt -> Channel . *** Channel to activate a queen
+ op pos    : MyInt -> Channel . *** where is the current position of the queen I
+ op fpos   : MyInt -> Channel . *** A position was tested and does not work.
+ op okpos  : MyInt -> Channel . *** One check worked.
+ op fail   : MyInt -> Channel . *** notify the queen I that we cannot find a solution with its position 
+ op commit : MyInt -> Channel . *** where is sent the validated position for the queen I
+ op globalFail : -> Channel . *** when no solutions were found
+ eq active(I) = fresh('act, I) .
+ eq pos(I) = fresh('pos, I) .
+ eq fpos(I) = fresh('fpos, I) .
+ eq okpos(I) = fresh('okpos, I) .
+ eq fail(I) = fresh('fail, I) .
+ eq commit(I) = fresh('commit, I) .
+ eq globalFail = 'GlobalFail .
+ 
+ *** Rolls used in the program
+ op rll : MyInt -> Kev . *** position for the queen I, where to rollback when it needs to move
+ eq rll(I) = fresh('roll, I) .
+
+ *** Notifications
+ op activate : MyInt -> PureProcess .
+ eq activate(I) = ((active(I)) <>) | ((fail(I)) -> roll(rll(I - 1))) .
+
+  *** Function that gives all the possible positions for the queen in the row in parameter (the positions are sent on the channel $pos_I$)
+ op allPosPos : MyInt -> PureProcess .
+
+ eq allPosPos (I) =
+  (pos(I)) < I ; 1 >: (pos(I)) < I ; 2 >: (pos(I)) < I ; 3 >: (pos(I)) < I ; 4 >:
+   (pos(I)) < I ; 5 >: (pos(I)) < I ; 6 >: (pos(I)) < I ; 7 >: (pos(I)) < I ; 8 >: (fail(I)) <> .
+
+ *** Function that checks if two queens in the position in parameter can eat each other
+ op err : Process Process -> Process .
+ eq err(P , Q) = ((fst(P)) p= (fst(Q))) or ((snd(P)) p= (snd(Q))) or ((abs((fst(P)) - (fst(Q)))) p= (abs((snd(P)) - (snd(Q))))) .
+
+
+*** Queens
+
+ op queen1 : -> Process .
+ op queen2 : -> Process .
+ op queen3 : -> Process .
+ op queen4 : -> Process .
+ op queen5 : -> Process .
+ op queen6 : -> Process .
+ op queen7 : -> Process .
+ op queen8 : -> Process .
+ 
+ eq queen1 = (allPosPos(1)) | ((pos(1))('q1): (rll(1)) -> (((commit(1)) < 'q1 >) | (activate(2)))) .
+
+ eq queen2 = (active(2)) -> (
+     (allPosPos(2)) | (pos(2))('q2): (rll(2)) -> ( (activate(3))
+       | (commit(1))('q1) -> (((commit(1)) < 'q1 >) | (if err('q1 , 'q2) then roll (rll(2)) else (okpos(2)) <> fi))
+       | (okpos(2)) -> (((commit(2)) < 'q2 >))
+   )) .
+ 
+ eq queen3 = (active(3)) -> (
+     (allPosPos(3)) | (pos(3))('q3): (rll(3)) -> ( (activate(4))
+       | (commit(1))('q1) -> (((commit(1)) < 'q1 >) | (if err('q1 , 'q3) then roll (rll(3)) else (okpos(3)) <> fi))
+       | (commit(2))('q2) -> (((commit(2)) < 'q2 >) | (if err('q2 , 'q3) then roll (rll(3)) else (okpos(3)) <> fi))
+       | (okpos(3)) -> (okpos(3)) -> (((commit(3)) < 'q3 >))
+   )) .
+
+ eq queen4 = (active(4))('X) -> (
+     (allPosPos(4)) | (pos(4))('q4): (rll(4)) -> ( (activate(5))
+       | (commit(1))('q1) -> (((commit(1)) < 'q1 >) | (if err('q1 , 'q4) then roll (rll(4)) else (okpos(4)) <> fi))
+       | (commit(2))('q2) -> (((commit(2)) < 'q2 >) | (if err('q2 , 'q4) then roll (rll(4)) else (okpos(4)) <> fi))
+       | (commit(3))('q3) -> (((commit(3)) < 'q3 >) | (if err('q3 , 'q4) then roll (rll(4)) else (okpos(4)) <> fi))
+       | (okpos(4)) -> (okpos(4)) -> (okpos(4)) -> (((commit(4)) < 'q4 >))
+   )) .
+
+ eq queen5 = (active(5)) -> (
+     (allPosPos(5)) | (pos(5))('q5): (rll(5)) -> ( (activate(6))
+       | (commit(1))('q1) -> (((commit(1)) < 'q1 >) | (if err('q1 , 'q5) then roll (rll(5)) else (okpos(5)) <> fi))
+       | (commit(2))('q2) -> (((commit(2)) < 'q2 >) | (if err('q2 , 'q5) then roll (rll(5)) else (okpos(5)) <> fi))
+       | (commit(3))('q3) -> (((commit(3)) < 'q3 >) | (if err('q3 , 'q5) then roll (rll(5)) else (okpos(5)) <> fi))
+       | (commit(4))('q4) -> (((commit(4)) < 'q4 >) | (if err('q4 , 'q5) then roll (rll(5)) else (okpos(5)) <> fi))
+       | (okpos(5)) -> (okpos(5)) -> (okpos(5)) -> (okpos(5)) -> (((commit(5)) < 'q5 >))
+   )) .
+
+ eq queen6 = (active(6)) -> (
+     (allPosPos(6)) | (pos(6))('q6): (rll(6)) -> ( (activate(7))
+       | (commit(1))('q1) -> (((commit(1)) < 'q1 >) | (if err('q1 , 'q6) then roll (rll(6)) else (okpos(6)) <> fi))
+       | (commit(2))('q2) -> (((commit(2)) < 'q2 >) | (if err('q2 , 'q6) then roll (rll(6)) else (okpos(6)) <> fi))
+       | (commit(3))('q3) -> (((commit(3)) < 'q3 >) | (if err('q3 , 'q6) then roll (rll(6)) else (okpos(6)) <> fi))
+       | (commit(4))('q4) -> (((commit(4)) < 'q4 >) | (if err('q4 , 'q6) then roll (rll(6)) else (okpos(6)) <> fi))
+       | (commit(5))('q5) -> (((commit(5)) < 'q5 >) | (if err('q5 , 'q6) then roll (rll(6)) else (okpos(6)) <> fi))
+       | (okpos(6)) -> (okpos(6)) -> (okpos(6)) -> (okpos(6)) -> (okpos(6)) -> (((commit(6)) < 'q6 >))
+   )) .
+
+ eq queen7 = (active(7)) -> (
+     (allPosPos(7)) | (pos(7))('q7): (rll(7)) -> ((activate(8))
+       | (commit(1))('q1) -> (((commit(1)) < 'q1 >) | (if err('q1 , 'q7) then roll (rll(7)) else (okpos(7)) <> fi))
+       | (commit(2))('q2) -> (((commit(2)) < 'q2 >) | (if err('q2 , 'q7) then roll (rll(7)) else (okpos(7)) <> fi))
+       | (commit(3))('q3) -> (((commit(3)) < 'q3 >) | (if err('q3 , 'q7) then roll (rll(7)) else (okpos(7)) <> fi))
+       | (commit(4))('q4) -> (((commit(4)) < 'q4 >) | (if err('q4 , 'q7) then roll (rll(7)) else (okpos(7)) <> fi))
+       | (commit(5))('q5) -> (((commit(5)) < 'q5 >) | (if err('q5 , 'q7) then roll (rll(7)) else (okpos(7)) <> fi))
+       | (commit(6))('q6) -> (((commit(6)) < 'q6 >) | (if err('q6 , 'q7) then roll (rll(7)) else (okpos(7)) <> fi))
+       | (okpos(7)) -> (okpos(7)) -> (okpos(7)) -> (okpos(7)) -> (okpos(7)) -> (okpos(7)) -> (((commit(7)) < 'q7 >) )
+   )) .
+
+ eq queen8 = (active(8)) -> (
+     (allPosPos(8)) | (pos(8))('q8): (rll(8)) -> (
+         (commit(1))('q1) -> (((commit(1)) < 'q1 >) | (if err('q1 , 'q8) then roll (rll(8)) else (okpos(8)) <> fi))
+       | (commit(2))('q2) -> (((commit(2)) < 'q2 >) | (if err('q2 , 'q8) then roll (rll(8)) else (okpos(8)) <> fi))
+       | (commit(3))('q3) -> (((commit(3)) < 'q3 >) | (if err('q3 , 'q8) then roll (rll(8)) else (okpos(8)) <> fi))
+       | (commit(4))('q4) -> (((commit(4)) < 'q4 >) | (if err('q4 , 'q8) then roll (rll(8)) else (okpos(8)) <> fi))
+       | (commit(5))('q5) -> (((commit(5)) < 'q5 >) | (if err('q5 , 'q8) then roll (rll(8)) else (okpos(8)) <> fi))
+       | (commit(6))('q6) -> (((commit(6)) < 'q6 >) | (if err('q6 , 'q8) then roll (rll(8)) else (okpos(8)) <> fi))
+       | (commit(7))('q7) -> (((commit(7)) < 'q7 >) | (if err('q7 , 'q8) then roll (rll(8)) else (okpos(8)) <> fi))
+       | (okpos(8)) -> (okpos(8)) -> (okpos(8)) -> (okpos(8)) -> (okpos(8)) -> (okpos(8)) -> (okpos(8)) -> (((commit(8)) < 'q8 >))
+   )) .
+
+ *** Putting everything together
+ 
+ op two-queen : -> Configuration .
+ eq two-queen = main( queen1 | queen2 ) .
+
+ op three-queen : -> Configuration .
+ eq three-queen = main( queen1 | queen2 | queen3 ) .
+ 
+ op four-queen : -> Configuration .
+ eq four-queen = main( queen1 | queen2 | queen3 | queen4 ) .
+ 
+ op five-queen : -> Configuration .
+ eq five-queen = main( queen1 | queen2 | queen3 | queen4 | queen5 ) .
+ 
+ op six-queen : -> Configuration .
+ eq six-queen = main( queen1 | queen2 | queen3 | queen4 | queen5 | queen6 ) .
+
+ op seven-queen : -> Configuration .
+ eq seven-queen = main( queen1 | queen2 | queen3 | queen4 | queen5 | queen6 | queen7 ) .
+
+ op eight-queen : -> Configuration .
+ eq eight-queen = main( queen1 | queen2 | queen3 | queen4 | queen5 | queen6 | queen7 | queen8 ) .
+
+
+endm

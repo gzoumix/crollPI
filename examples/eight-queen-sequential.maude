@@ -1,0 +1,157 @@
+in croll-interpreter
+
+*** Principle of the algorithm
+*** --------------------------
+***
+*** Each queen, in turns, choose a position that suits it in its row
+*** To perform that, each queen has a "list" of all its possible positions,
+*** given by the function allPosPos.
+*** A queen is first waits for all the previous queen to have found their positions,
+*** and then tests in turn each of its positions (using rollback to switch for the next position)
+*** until it finds a suitable position.
+*** When there are no suitable position, it means that the previous queens are not well placed,
+*** and thus the queen sends a message to the previous one, asking it to find a different position.
+*** That queen thus rollbacks, which triggers the re-initialization of the current queen. 
+
+mod EIGHT-QUEEN is
+ protecting CROLL-INTERPRETER .
+ 
+ vars I : MyInt .
+ vars X Y : Variable .
+ vars P Q : Process .
+
+ *** Channels used in the program
+ op pos   : MyInt -> Channel . *** where are are sent all the possible position for the queen I
+ op fail   : MyInt -> Channel . *** notify the queen I that we cannot find a solution with its position 
+ op commit : MyInt -> Channel . *** where is sent the validated position for the queen I
+ op globalFail : -> Channel . *** when no solutions were found
+ *** eq pos(I) = fresh('pos, I) .
+ eq pos(I) = fresh('pos, I) .
+ eq fail(I) = fresh('fail, I) .
+ eq commit(I) = fresh('commit, I) .
+ eq globalFail = 'GlobalFail .
+ 
+ *** Rolls used in the program
+ op rll : MyInt -> Kev . *** position for the queen I, where to rollback when it needs to move
+ eq rll(I) = fresh('roll, I) .
+ 
+ *** Function that gives all the possible positions for the queen in the row in parameter (the positions are sent on the channel $pos_I$)
+ op allPosPos : MyInt -> PureProcess .
+ eq allPosPos (I) =
+  (pos(I)) < I ; 1 >: (pos(I)) < I ; 2 >: (pos(I)) < I ; 3 >: (pos(I)) < I ; 4 >:
+   (pos(I)) < I ; 5 >: (pos(I)) < I ; 6 >: (pos(I)) < I ; 7 >: (pos(I)) < I ; 8 >: (fail(I))<> .
+
+ *** Function that checks if two queens in the position in parameter can eat each other
+ op err : Process Process -> Process .
+ eq err(P , Q) = ((fst(P)) p= (fst(Q))) or ((snd(P)) p= (snd(Q))) or ((abs((fst(P)) - (fst(Q)))) p= (abs((snd(P)) - (snd(Q))))) .
+
+
+*** Queens
+
+ op queen1 : -> Process .
+ op queen2 : -> Process .
+ op queen3 : -> Process .
+ op queen4 : -> Process .
+ op queen5 : -> Process .
+ op queen6 : -> Process .
+ op queen7 : -> Process .
+ op queen8 : -> Process .
+ 
+ eq queen1 = (allPosPos(1)) | ((pos(1))('X1): (rll(1)) -> ((commit(1)) < 'X1 > | ((fail(2)) -> roll (rll(1))) )) .
+
+ eq queen2 =
+  (commit(1))('X1) -> ((commit(1)) < 'X1 >
+    | (allPosPos(2)) | (pos(2))('X2): (rll(2)) ->
+      if err('X1 , 'X2) then roll (rll(2)) else
+         (commit(2)) < 'X2 > | ((fail(3)) -> roll (rll(2)))
+      fi) .
+
+ eq queen3 =
+  (commit(1))('X1) -> ((commit(1)) < 'X1 > | (commit(2))('X2) -> ((commit(2)) < 'X2 >
+    | (allPosPos(3)) | (pos(3))('X3): (rll(3)) ->
+      if err('X1 , 'X3) then roll (rll(3)) else
+      if err('X2 , 'X3) then roll (rll(3)) else      
+         (commit(3)) < 'X3 > | ((fail(4)) -> roll (rll(3)))
+      fi fi)) .
+
+ eq queen4 =
+  (commit(1))('X1) -> ((commit(1)) < 'X1 > | (commit(2))('X2) -> ((commit(2)) < 'X2 >  | (commit(3))('X3) -> ((commit(3)) < 'X3 >
+    | (allPosPos(4)) | (pos(4))('X4): (rll(4)) ->
+      if err('X1 , 'X4) then roll (rll(4)) else
+      if err('X2 , 'X4) then roll (rll(4)) else      
+      if err('X3 , 'X4) then roll (rll(4)) else      
+         (commit(4)) < 'X4 > | ((fail(5)) -> roll (rll(4)))
+      fi fi fi))) .
+
+ eq queen5 =
+  (commit(1))('X1) -> ((commit(1)) < 'X1 > | (commit(2))('X2) -> ((commit(2)) < 'X2 >  | (commit(3))('X3) -> ((commit(3)) < 'X3 > | (commit(4))('X4) -> ((commit(4)) < 'X4 >
+    | (allPosPos(5)) | (pos(5))('X5): (rll(5)) ->
+      if err('X1 , 'X5) then roll (rll(5)) else
+      if err('X2 , 'X5) then roll (rll(5)) else      
+      if err('X3 , 'X5) then roll (rll(5)) else      
+      if err('X4 , 'X5) then roll (rll(5)) else      
+         (commit(5)) < 'X5 > | ((fail(6)) -> roll (rll(5)))
+      fi fi fi fi)))) .
+
+ eq queen6 =
+  (commit(1))('X1) -> ((commit(1)) < 'X1 > | (commit(2))('X2) -> ((commit(2)) < 'X2 >  | (commit(3))('X3) -> ((commit(3)) < 'X3 > | (commit(4))('X4) -> ((commit(4)) < 'X4 > | (commit(5))('X5) -> ((commit(5)) < 'X5 >
+    | (allPosPos(6)) | (pos(6))('X6): (rll(6)) ->
+      if err('X1 , 'X6) then roll (rll(6)) else
+      if err('X2 , 'X6) then roll (rll(6)) else      
+      if err('X3 , 'X6) then roll (rll(6)) else      
+      if err('X4 , 'X6) then roll (rll(6)) else      
+      if err('X5 , 'X6) then roll (rll(6)) else      
+         (commit(6)) < 'X6 > | ((fail(7)) -> roll (rll(6)))
+      fi fi fi fi fi))))) .
+
+ eq queen7 =
+  (commit(1))('X1) -> ((commit(1)) < 'X1 > | (commit(2))('X2) -> ((commit(2)) < 'X2 >  | (commit(3))('X3) -> ((commit(3)) < 'X3 > | (commit(4))('X4) -> ((commit(4)) < 'X4 > | (commit(5))('X5) -> ((commit(5)) < 'X5 > | (commit(6))('X6) -> ((commit(6)) < 'X6 >
+    | (allPosPos(7)) | (pos(7))('X7): (rll(7)) ->
+      if err('X1 , 'X7) then roll (rll(7)) else
+      if err('X2 , 'X7) then roll (rll(7)) else      
+      if err('X3 , 'X7) then roll (rll(7)) else      
+      if err('X4 , 'X7) then roll (rll(7)) else      
+      if err('X5 , 'X7) then roll (rll(7)) else      
+      if err('X6 , 'X7) then roll (rll(7)) else      
+         (commit(7)) < 'X7 > | ((fail(8)) -> roll (rll(7)))
+      fi fi fi fi fi fi)))))) .
+
+ eq queen8 =
+  (commit(1))('X1) -> ((commit(1)) < 'X1 > | (commit(2))('X2) -> ((commit(2)) < 'X2 >  | (commit(3))('X3) -> ((commit(3)) < 'X3 > | (commit(4))('X4) -> ((commit(4)) < 'X4 > | (commit(5))('X5) -> ((commit(5)) < 'X5 > | (commit(6))('X6) -> ((commit(6)) < 'X6 > | (commit(7))('X7) -> ((commit(7)) < 'X7 >
+    | (allPosPos(8)) | (pos(8))('X8): (rll(8)) ->
+      if err('X1 , 'X8) then roll (rll(8)) else
+      if err('X2 , 'X8) then roll (rll(8)) else      
+      if err('X3 , 'X8) then roll (rll(8)) else      
+      if err('X4 , 'X8) then roll (rll(8)) else      
+      if err('X5 , 'X8) then roll (rll(8)) else      
+      if err('X6 , 'X8) then roll (rll(8)) else      
+      if err('X7 , 'X8) then roll (rll(8)) else      
+         (commit(8)) < 'X8 >
+      fi fi fi fi fi fi fi))))))) .
+
+
+ *** Putting everything together
+ 
+ op two-queen : -> Configuration .
+ eq two-queen = main( queen1 | queen2 ) .
+ 
+ op three-queen : -> Configuration .
+ eq three-queen = main( queen1 | queen2 | queen3 ) .
+ 
+ op four-queen : -> Configuration .
+ eq four-queen = main( queen1 | queen2 | queen3 | queen4 ) .
+ 
+ op five-queen : -> Configuration .
+ eq five-queen = main( queen1 | queen2 | queen3 | queen4 | queen5 ) .
+ 
+ op six-queen : -> Configuration .
+ eq six-queen = main( queen1 | queen2 | queen3 | queen4 | queen5 | queen6 ) .
+
+ op seven-queen : -> Configuration .
+ eq seven-queen = main( queen1 | queen2 | queen3 | queen4 | queen5 | queen6 | queen7 ) .
+
+ op eight-queen : -> Configuration .
+ eq eight-queen = main( queen1 | queen2 | queen3 | queen4 | queen5 | queen6 | queen7 | queen8 ) .
+  
+
+endm

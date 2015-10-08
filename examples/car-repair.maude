@@ -1,0 +1,162 @@
+in croll-interpreter
+
+*** This case study is taken from "Dynamic Error Handling in Service Oriented Applications, Fundam. Inf. 2009"
+
+*** Principle of the algorithm
+*** --------------------------
+***
+*** Let suppose you are on the road, and your car broke down in the middle of nowhere.
+*** You then have to find
+***   1. a garage to repair your car
+***   2. a truck to move it to the garage
+***   3. a rented car so you can continue your journey.
+*** 
+*** Here, we suppose that in parallel of looking for a car to rent,
+*** we look in sequence for first a garage and then a truck to take your broken car.
+*** As there are several companies for each services, we use reversibility to enable
+*** **speculative parallelism** to pick the first services that answer ok, and rollback the ones that haven't finished yet.
+
+
+mod SERVICES is
+ protecting CROLL-INTERPRETER .
+ protecting QID-LIST .
+  
+ *********************************************************
+ *** 1. A Bank
+
+ *** We arbitrarily state that there is 4700 euros in the account.
+ op account : -> Process .
+ eq account = 'account < 4700 > .
+
+
+ *** one can ask to withdraw an amount "'to_pay" from the account, which succeeds when there is enough money in the account
+ op withdraw : -> Process .
+ eq withdraw = 'bank_withdraw !('to_pay) : 'pay -> ('account('money): 'g ->
+      if  fst('to_pay) <= 'money then ('account < 'money - fst('to_pay) > | snd('to_pay))  else roll('pay) fi) .
+ 
+ *** the bank provides the account and the withdrawal service
+ op bank : -> Process .
+ eq bank = account | withdraw .
+
+
+ *********************************************************
+ *** 2. A Generic Compagny, providing a service for a cost
+
+
+ var N : Qid .
+ var I : MyInt .
+
+ *** A compagny has a name and a price
+ op genericCompany : Qid MyInt -> Process .
+ eq genericCompany(N , I) = (cat(N , '_book)) : (cat(N , '_roll)) -> (
+        (cat(N , '_price)) < I >                       *** define the price of the service
+      | (cat(N , '_rev)) -> roll((cat(N , '_roll))) *** define the cancelation channel
+    ) .
+
+ *** if we can pay, we pay, otherwise, we rollback
+ op genericCompanyNpay : Qid MyInt -> Process .
+ eq genericCompanyNpay(N , I) = (genericCompany(N , I))
+      | ((cat(N , '_price))('price) : '0 -> ('bank_withdraw < ('price ; ((cat(N , '_ok)) <>)) >: ((cat(N , '_rev)) <>))) .
+
+ *** A closed compagny only has a name
+ op genericCompanyClosed : Qid -> Process .
+ eq genericCompanyClosed(N) = (cat(N , '_book)) -> (cat(N , '_fail)) <> .
+ 
+
+ *********************************************************
+ *** 3. Speculative Service
+
+ *** suppose that we have the a list of available services,
+ *** we try in parallel all of them and 
+ op speculativeService : Qid QidList -> Process .
+ op speculativeTrigger : QidList -> Process .
+ op speculativeFinish  : Qid QidList -> Process .
+ op speculativeFail  : Qid QidList -> Process .
+ op speculativeFinishAcc  : Qid QidList QidList -> Process .
+ op speculativeFinishElAcc  : Qid QidList -> Process .
+
+ var M : Qid .
+ vars L L1 L2 : QidList .
+
+
+ eq speculativeService(N , L) = (cat(N , '_book)) : (cat(N , '_roll)) -> (*** start the speculative services
+         (speculativeTrigger(L))                               *** start all the services
+       | (speculativeFinish(N , L))                               *** wait for one to finish and rollback the others
+       | (speculativeFail(N , L))                              *** send a global failure message when all fail
+       | (cat(N , '_rev)) -> roll((cat(N , '_roll)))) .        *** cancel the service
+
+ eq speculativeTrigger(nil) = 0 .
+ eq speculativeTrigger(N L) = ((cat(N , '_book)) <>: ((cat(N , '_fail)) <>)) | (speculativeTrigger(L))  .
+
+
+ eq speculativeFinish(N, L) = speculativeFinishAcc(N, L , L) .
+ eq speculativeFinishAcc(N, nil, L) = 0 .
+ eq speculativeFinishAcc(N, M L1 , L2) = (speculativeFinishAcc(N, L1 , L2)) | ((cat(M , '_ok)) -> (
+       (cat(N , '_ok) <>)                   *** the speculative service finished with a success
+     | (speculativeFinishElAcc(M , L2)))) . *** we rollback all computations different from M
+ eq speculativeFinishElAcc(N , nil) = 0 .
+ eq speculativeFinishElAcc(N , N L) = speculativeFinishElAcc(N , L) .
+ ceq speculativeFinishElAcc(N , M L) = ((cat(M , '_rev)) <>) | (speculativeFinishElAcc(N , L)) if N =/= M .
+
+ eq speculativeFail(N , nil) = 0 .
+ eq speculativeFail(N , M) = (cat(M , '_fail)) -> (cat(N , '_fail)) <> .
+ ceq speculativeFail(N , M L) = (cat(M , '_fail)) -> (speculativeFail(N , L)) if L =/= nil .
+
+
+endm
+
+
+
+mod CAR-REPAIR is
+ protecting SERVICES .
+
+ *********************************************************
+ *** 1. The three parts of the workflow
+
+ op carRental : -> Process .
+ eq carRental = 
+       genericCompanyClosed('rental1)
+     | genericCompanyNpay('rental2 , 7000)
+     | genericCompanyNpay('rental3 , 300)
+     | speculativeService('rental , 'rental1 'rental2 'rental3 nil) .
+*** there are three companies that can rent a car.
+*** The first one is closed and the second one costs too much.
+
+
+ op garage : -> Process .
+ eq garage = 
+       genericCompanyClosed('garage1)
+     | genericCompanyNpay('garage2 , 2000)
+     | genericCompanyNpay('garage3 , 1530)
+     | speculativeService('garage , 'garage1 'garage2 'garage3 nil) .
+*** there are three companies that host your car.
+*** The first one is closed and the third one is the less expensive.
+
+ op truck : -> Process .
+ eq truck = 
+       genericCompanyClosed('truck1)
+     | genericCompanyNpay('truck2 , 200)
+     | genericCompanyNpay('truck3 , 500)
+     | speculativeService('truck , 'truck1 'truck2 'truck3 nil) .
+*** there are three companies that give you a gtuck to move your car.
+*** The first one is closed and the second one is the less expensive.
+
+ *********************************************************
+ *** 2. put everything together
+
+ op carRepair : -> Configuration .
+ eq carRepair = main (
+         carRental | garage | truck                         *** the three available services
+       | 'rental_book <> | 'garage_book <>                  *** we start the car rental and the garage booking in parallel
+       | 'garage_ok -> ('garage_ok <> | 'truck_book <>)     *** when the garage is booked, we call for the truck
+       | bank                                               *** and finally, the bank to pay 
+  ) .
+
+*** with the current implementation of maude, the speculative parallelism will choose the services
+*** - rental3
+*** - garage2
+*** - truck2
+
+endm
+
+
